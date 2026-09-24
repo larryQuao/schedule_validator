@@ -1,0 +1,13 @@
+target/
+out/
+out_self/
+installer/
+*.log
+.idea/
+*.iml
+.vscode/
+
+# Sample contains real member personal data (names + SS numbers) - do not publish.
+# Keep it locally, or move an anonymized copy in if the repo must stay self-contained.
+Samples/
+tmp_*/

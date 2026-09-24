@@ -1,0 +1,46 @@
+/* Schedule Validator - desktop theme */
+
+.root {
+    -fx-font-family: "Segoe UI", system, sans-serif;
+    -fx-font-size: 13px;
+    -fx-background-color: #f4f5f7;
+}
+
+.label {
+    -fx-text-fill: #24292f;
+}
+
+.button {
+    -fx-background-color: #ffffff;
+    -fx-border-color: #d0d7de;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+    -fx-padding: 5 12 5 12;
+}
+
+.button:hover {
+    -fx-background-color: #f0f3f6;
+}
+
+.table-view {
+    -fx-border-color: #d0d7de;
+    -fx-border-radius: 4;
+}
+
+.table-view .column-header .label {
+    -fx-font-weight: bold;
+}
+
+.sev-error {
+    -fx-text-fill: #cf222e;
+    -fx-font-weight: bold;
+}
+
+.sev-warning {
+    -fx-text-fill: #9a6700;
+    -fx-font-weight: bold;
+}
+
+.sev-info {
+    -fx-text-fill: #57606a;
+}
