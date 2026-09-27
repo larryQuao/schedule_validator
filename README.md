@@ -8,6 +8,10 @@ Tuned against the reference sample `Samples/ANNE MARIE CONTRIBUTION REPORT.xlsx`
 (SSNIT-style employer report: one sheet per month, Member Code / SS No / Surname /
 Firstname / Other Names / Basic Salary / 5% Contribution columns, printed totals row).
 
+**Full project documentation:** [DOCUMENTATION.md](DOCUMENTATION.md) — architecture,
+module map, parser behaviour, validation rule catalog, verification results, packaging,
+limitations and roadmap.
+
 ## Stack
 
 | Concern        | Choice                                      |
