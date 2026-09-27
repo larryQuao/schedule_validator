@@ -132,6 +132,14 @@ public final class Pipeline {
         }
         List<ContributionEntry> uploadEntries = new java.util.ArrayList<>();
         uploads.forEach(s -> uploadEntries.addAll(s.entries()));
+        // name the new sheet after the NEWEST month in the upload
+        ScheduleSheet newestUpload = uploads.get(0);
+        for (ScheduleSheet s : uploads) {
+            if (s.periodStart() != null && (newestUpload.periodStart() == null
+                    || s.periodStart().compareTo(newestUpload.periodStart()) > 0)) {
+                newestUpload = s;
+            }
+        }
 
         log.add("Parsing reference workbook: " + referencePath.getFileName());
         ContributionReport refReport = parse(referencePath, tessdataDir);
@@ -148,10 +156,13 @@ public final class Pipeline {
         Files.createDirectories(outDir);
         log.add("Building new month sheet from template '" + selected.sheetName() + "'...");
         SheetMerger.MergeSummary merge = new SheetMerger().build(
-                referencePath, selected.sheetName(), uploads.get(0), uploadEntries, outDir);
+                referencePath, selected.sheetName(), newestUpload, uploadEntries, outDir);
         issues.add(ValidationIssue.info("MERGE", merge.newSheetName(), "-", "MERGE_SUMMARY",
                 merge.matched() + " carried over, " + merge.added() + " new (green), "
                         + merge.removed() + " removed (red). Saved: " + merge.updatedWorkbook()));
+        for (String note : merge.notes()) {
+            issues.add(ValidationIssue.warning("MERGE", merge.newSheetName(), "-", "MERGE_NOTE", note));
+        }
         log.add("Wrote " + merge.updatedWorkbook() + " (new sheet: " + merge.newSheetName() + ")");
 
         Path reportFile = outDir.resolve("validation_report.xlsx");

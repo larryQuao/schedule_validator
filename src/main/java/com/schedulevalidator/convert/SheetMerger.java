@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
 public final class SheetMerger {
 
     public record MergeSummary(Path updatedWorkbook, String newSheetName,
-                               int matched, int added, int removed) {}
+                               int matched, int added, int removed, List<String> notes) {}
 
     private static final Pattern A1_REF = Pattern.compile("(\\$?[A-Z]{1,3})(\\$?)(\\d{1,5})");
 
@@ -125,14 +125,15 @@ public final class SheetMerger {
 
             Map<Short, CellStyle> greenCache = new HashMap<>();
             Map<Short, CellStyle> redCache = new HashMap<>();
+            List<String> notes = new ArrayList<>();
 
             int seq = 1;
             int r0 = ti.headerRow0() + 1; // 0-based row cursor
             for (ContributionEntry up : matched) {
-                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, null, null);
+                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, null, null, notes);
             }
             for (ContributionEntry up : added) {
-                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, greenCache, IndexedColors.LIGHT_GREEN);
+                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, greenCache, IndexedColors.LIGHT_GREEN, notes);
             }
             int lastData1 = r0; // 1-based row number of the last data row
 
@@ -140,6 +141,16 @@ public final class SheetMerger {
             int rTot0 = r0++;
             Row templateTotals = existing.totalRow() > 0 ? template.getRow(existing.totalRow() - 1) : null;
             Row totals = sh.createRow(rTot0);
+            double salarySum = 0;
+            double contributionSum = 0;
+            for (ContributionEntry e : matched) {
+                if (e.basicSalary() != null) salarySum += e.basicSalary();
+                if (e.contribution() != null) contributionSum += e.contribution();
+            }
+            for (ContributionEntry e : added) {
+                if (e.basicSalary() != null) salarySum += e.basicSalary();
+                if (e.contribution() != null) contributionSum += e.contribution();
+            }
             for (int c = 0; c <= ti.lastDataCol0(); c++) {
                 Cell tc = templateTotals == null ? null : templateTotals.getCell(c);
                 Cell nc = totals.createCell(c);
@@ -152,15 +163,22 @@ public final class SheetMerger {
                         .mapToInt(Map.Entry::getKey).findFirst().orElse(-1);
                 if (isAmountCol) {
                     String letter = CellReference.convertNumToColString(c);
-                    nc.setCellFormula("SUM(" + letter + dataStart1 + ":" + letter + lastData1 + ")");
+                    double fallback = c == colOf(ti, XlsxScheduleParser.Col.BASIC_SALARY) ? salarySum : contributionSum;
+                    try {
+                        nc.setCellFormula("SUM(" + letter + dataStart1 + ":" + letter + lastData1 + ")");
+                    } catch (RuntimeException ex) {
+                        nc.setCellValue(fallback);
+                        notes.add("Totals formula replaced with computed value " + fallback
+                                + " for column " + letter + ": " + ex.getMessage());
+                    }
                 } else if (tc != null) {
-                    copyCellValue(tc, nc, 0);
+                    copyCellValueSafe(tc, nc, notes);
                 }
             }
 
             // ---------------------------------------------------------------- removed rows
             for (ContributionEntry ex : removed) {
-                writeRemovedRow(sh, r0++, ex, ti, colStyles, colFormulas, colFormulaRow1, redCache);
+                writeRemovedRow(sh, r0++, ex, ti, colStyles, colFormulas, colFormulaRow1, redCache, notes);
             }
 
             // ---------------------------------------------------------------- geometry
@@ -179,7 +197,7 @@ public final class SheetMerger {
             try (var os = Files.newOutputStream(out)) {
                 wb.write(os);
             }
-            return new MergeSummary(out, newName, matched.size(), added.size(), removed.size());
+            return new MergeSummary(out, newName, matched.size(), added.size(), removed.size(), notes);
         }
     }
 
@@ -188,7 +206,7 @@ public final class SheetMerger {
     private void writeDataRow(XSSFSheet sh, int r0, ContributionEntry up, int seq,
                               XlsxScheduleParser.TemplateInfo ti, CellStyle[] colStyles,
                               String[] colFormulas, int[] colFormulaRow1,
-                              Map<Short, CellStyle> tintCache, IndexedColors tint) {
+                              Map<Short, CellStyle> tintCache, IndexedColors tint, List<String> notes) {
         Row row = sh.createRow(r0);
         if (ti.seqCol0() >= 0) {
             Cell seqCell = row.createCell(ti.seqCol0());
@@ -203,8 +221,8 @@ public final class SheetMerger {
             Cell cell = row.createCell(c);
             if (colStyles[c] != null) cell.setCellStyle(style(sh.getWorkbook(), colStyles[c], tintCache, tint));
             if (colFormulas[c] != null && c != colOf(ti, XlsxScheduleParser.Col.MEMBER_CODE)
-                    && c != colOf(ti, XlsxScheduleParser.Col.SS_NO)) {
-                cell.setCellFormula(shiftFormula(colFormulas[c], colFormulaRow1[c], r0 + 1));
+                    && c != colOf(ti, XlsxScheduleParser.Col.SS_NO)
+                    && tryFormula(cell, colFormulas[c], colFormulaRow1[c], r0 + 1, notes)) {
                 continue;
             }
             switch (en.getValue()) {
@@ -224,7 +242,8 @@ public final class SheetMerger {
 
     private void writeRemovedRow(XSSFSheet sh, int r0, ContributionEntry ex,
                                  XlsxScheduleParser.TemplateInfo ti, CellStyle[] colStyles,
-                                 String[] colFormulas, int[] colFormulaRow1, Map<Short, CellStyle> redCache) {
+                                 String[] colFormulas, int[] colFormulaRow1,
+                                 Map<Short, CellStyle> redCache, List<String> notes) {
         Row row = sh.createRow(r0);
         int seqCol = ti.seqCol0();
         int firstCol = seqCol >= 0 ? seqCol : 0;
@@ -237,8 +256,8 @@ public final class SheetMerger {
                 continue;
             }
             if (colFormulas[c] != null && c != colOf(ti, XlsxScheduleParser.Col.MEMBER_CODE)
-                    && c != colOf(ti, XlsxScheduleParser.Col.SS_NO)) {
-                cell.setCellFormula(shiftFormula(colFormulas[c], colFormulaRow1[c], r0 + 1));
+                    && c != colOf(ti, XlsxScheduleParser.Col.SS_NO)
+                    && tryFormula(cell, colFormulas[c], colFormulaRow1[c], r0 + 1, notes)) {
                 continue;
             }
             switch (ti.columns().getOrDefault(c, XlsxScheduleParser.Col.SEQ)) {
@@ -266,7 +285,7 @@ public final class SheetMerger {
         if (src.getHeight() != 0) dst.setHeight(src.getHeight());
     }
 
-    private void copyCellValue(Cell src, Cell dst, int rowShift) {
+    private static void copyCellValue(Cell src, Cell dst, int rowShift) {
         switch (src.getCellType()) {
             case STRING -> dst.setCellValue(src.getStringCellValue());
             case NUMERIC -> dst.setCellValue(src.getNumericCellValue());
@@ -327,6 +346,31 @@ public final class SheetMerger {
         }
         sb.append(formula.substring(last));
         return sb.toString();
+    }
+
+    /**
+     * Attempts to set a row-shifted formula; on any parser rejection writes nothing and
+     * records a note so the merge never fails over an exotic template formula.
+     */
+    private static boolean tryFormula(Cell cell, String original, int oldRow1, int newRow1,
+                                      List<String> notes) {
+        String shifted = shiftFormula(original, oldRow1, newRow1);
+        try {
+            cell.setCellFormula(shifted);
+            return true;
+        } catch (RuntimeException e) {
+            notes.add("Row " + (cell.getRowIndex() + 1) + ": formula '" + original
+                    + "' could not be carried over (" + e.getMessage() + ") - value written instead.");
+            return false;
+        }
+    }
+
+    private static void copyCellValueSafe(Cell src, Cell dst, List<String> notes) {
+        try {
+            copyCellValue(src, dst, 0);
+        } catch (RuntimeException e) {
+            notes.add("Cell " + src.getAddress() + " copied blank: " + e.getMessage());
+        }
     }
 
     private static String uniqueName(XSSFWorkbook wb, String wanted) {
