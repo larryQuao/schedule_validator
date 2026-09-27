@@ -1,8 +1,11 @@
 package com.schedulevalidator;
 
 import com.schedulevalidator.compare.ReportComparator;
+import com.schedulevalidator.convert.SheetMerger;
 import com.schedulevalidator.convert.XlsxExporter;
+import com.schedulevalidator.model.ContributionEntry;
 import com.schedulevalidator.model.ContributionReport;
+import com.schedulevalidator.model.ScheduleSheet;
 import com.schedulevalidator.model.ValidationIssue;
 import com.schedulevalidator.parse.ImageScheduleParser;
 import com.schedulevalidator.parse.PdfScheduleParser;
@@ -23,7 +26,8 @@ public final class Pipeline {
                          ContributionReport referenceReport,
                          List<ValidationIssue> issues,
                          Path reportFile,
-                         Path convertedFile) {}
+                         Path convertedFile,
+                         Path updatedWorkbook) {}
 
     private Pipeline() {}
 
@@ -107,7 +111,53 @@ public final class Pipeline {
             exporter.writeConvertedSchedule(upReport, convertedFile);
             log.add("Wrote " + convertedFile + " (converted to .xlsx in reference layout)");
         }
-        return new Result(upReport, refReport, issues, reportFile, convertedFile);
+        return new Result(upReport, refReport, issues, reportFile, convertedFile, null);
+    }
+
+    /**
+     * Sheet-merge mode: the user picks one sheet of the reference report, the upload carries
+     * the new month's schedule, and after validation a NEW sheet is added to a copy of the
+     * reference workbook — template structure and formulas preserved, new records green,
+     * records missing from the upload marked REMOVED below the totals in red.
+     */
+    public static Result runSheetMerge(Path referencePath, String sheetName, Path uploadPath,
+                                       Path outDir, Path tessdataDir, List<String> log) throws IOException {
+        log.add("Parsing uploaded file: " + uploadPath.getFileName());
+        ContributionReport upReport = parse(uploadPath, tessdataDir);
+        List<ValidationIssue> issues = new ArrayList<>(new ValidationEngine().validate(upReport));
+
+        List<ScheduleSheet> uploads = upReport.getMonthlySheets();
+        if (uploads.isEmpty()) {
+            throw new IOException("Uploaded file contains no recognizable schedule rows.");
+        }
+        List<ContributionEntry> uploadEntries = new java.util.ArrayList<>();
+        uploads.forEach(s -> uploadEntries.addAll(s.entries()));
+
+        log.add("Parsing reference workbook: " + referencePath.getFileName());
+        ContributionReport refReport = parse(referencePath, tessdataDir);
+        ScheduleSheet selected = refReport.getMonthlySheets().stream()
+                .filter(s -> s.sheetName().equalsIgnoreCase(sheetName))
+                .findFirst()
+                .orElseThrow(() -> new IOException(
+                        "Sheet '" + sheetName + "' was not found or has no recognizable schedule in the reference."));
+
+        ContributionReport selectedOnly = new ContributionReport(referencePath, ContributionReport.SourceKind.XLSX);
+        selectedOnly.getMonthlySheets().add(selected);
+        issues.addAll(new ReportComparator().compare(selectedOnly, upReport));
+
+        Files.createDirectories(outDir);
+        log.add("Building new month sheet from template '" + selected.sheetName() + "'...");
+        SheetMerger.MergeSummary merge = new SheetMerger().build(
+                referencePath, selected.sheetName(), uploads.get(0), uploadEntries, outDir);
+        issues.add(ValidationIssue.info("MERGE", merge.newSheetName(), "-", "MERGE_SUMMARY",
+                merge.matched() + " carried over, " + merge.added() + " new (green), "
+                        + merge.removed() + " removed (red). Saved: " + merge.updatedWorkbook()));
+        log.add("Wrote " + merge.updatedWorkbook() + " (new sheet: " + merge.newSheetName() + ")");
+
+        Path reportFile = outDir.resolve("validation_report.xlsx");
+        new XlsxExporter().writeValidationReport(issues, referencePath, uploadPath, reportFile);
+        log.add("Wrote " + reportFile);
+        return new Result(upReport, refReport, issues, reportFile, null, merge.updatedWorkbook());
     }
 
     static String extension(Path file) {

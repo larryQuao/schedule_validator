@@ -44,8 +44,39 @@ public final class XlsxScheduleParser {
     private static final int MAX_COLUMN_GAP = 2;        // unmapped columns tolerated inside a table
     private static final int MAX_BLANK_RUN = 12;        // blank rows before scanning gives up
 
-    private enum Col { SEQ, MEMBER_CODE, SS_NO, SURNAME, FIRST_NAME, OTHER_NAMES, FULL_NAME,
-                       BASIC_SALARY, CONTRIBUTION, TOTAL, DESCRIPTION, DOB }
+    public enum Col { SEQ, MEMBER_CODE, SS_NO, SURNAME, FIRST_NAME, OTHER_NAMES, FULL_NAME,
+                      BASIC_SALARY, CONTRIBUTION, TOTAL, DESCRIPTION, DOB }
+
+    /** Public view of a sheet's detected layout, for template-driven sheet building. */
+    public record TemplateInfo(int headerRow0, int firstDataRow0, int seqCol0,
+                               Map<Integer, Col> columns, int lastDataCol0) {}
+
+    /**
+     * Inspects a sheet's layout without parsing its rows: header row index (0-based), first
+     * data row, sequence column, mapped roles per column, and the last column that belongs
+     * to the main table (side tables are excluded).
+     */
+    public TemplateInfo inspectTemplate(Sheet sheet) {
+        ColumnMap cm = findColumnMap(sheet);
+        if (cm == null) return null;
+        int lastData = -1;
+        for (Map.Entry<Integer, Col> e : cm.byColumn.entrySet()) {
+            if (e.getValue() != Col.SEQ && e.getKey() > lastData) lastData = e.getKey();
+        }
+        return new TemplateInfo(cm.headerRow - 1, cm.headerRow, findSeqColumn(sheet, cm),
+                new TreeMap<>(cm.byColumn), lastData);
+    }
+
+    /** Parses exactly one sheet into a {@link ScheduleSheet}, or null if no schedule header. */
+    public ScheduleSheet parseSingleSheet(Sheet sheet) {
+        ColumnMap cm = findColumnMap(sheet);
+        if (cm == null) return null;
+        ParsedRows rows = scanRows(sheet, cm);
+        Period period = parsePeriod(sheet.getSheetName());
+        return new ScheduleSheet(sheet.getSheetName(), period.start(), period.end(), period.label(),
+                cm.headerRow, rows.entries, rows.statedSalary, rows.statedContribution,
+                rows.totalRow, rows.postTotalRows, findMonthLabel(sheet));
+    }
 
     private static final Map<String, Col> HEADER_ROLES = new HashMap<>();
     static {

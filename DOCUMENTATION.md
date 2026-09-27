@@ -194,6 +194,23 @@ normalized full name. Months align on parsed period (`yyyy-MM`).
 
 ## 6. Outputs
 
+**Sheet-merge mode (new-month workflow)** — when the user picks a specific sheet of the
+reference report plus an upload, `Pipeline.runSheetMerge` + `SheetMerger` produce a *copy*
+of the contribution report with a **new sheet for the uploaded month**, built from the
+selected sheet as template:
+
+- header block, column headers, per-column styles, merged regions, column widths and
+  freeze panes are copied from the template;
+- per-cell data-row formulas (`G=CONCATENATE(D," ",E," ",F)`, `I=0.05*H`, `J=IF(C=M,…`)
+  are carried into the new rows with relative references shifted;
+- members found in both files keep the template's order and take the upload's values;
+- members only in the upload are appended and filled **green** (LIGHT_GREEN);
+- members of the template missing from the upload are written **below the totals row**,
+  filled **red** (ROSE) with `REMOVED` in the first column, and excluded from the totals;
+- the totals row becomes a live `=SUM()` over kept + new rows only;
+- output: `<reference name> - updated.xlsx` beside the other reports (the original file
+  is never modified); the merge summary appears as an INFO finding.
+
 **`validation_report.xlsx`** — two sheets: *Summary* (generation time, input files,
 error/warning/info counts) and *Findings* (one row per issue: severity-coloured, with
 source file kind, sheet, location, rule, message; auto-filter and frozen header).
@@ -202,7 +219,7 @@ source file kind, sheet, location, rule, message; auto-filter and frozen header)
 layout: `B1:C1` merge, row-2 header block (SSNIT reg / employer / scheme), row-3 column
 headers, member rows from row 4, computed totals row, sample column widths, frozen panes.
 
-Both are written to `%USERPROFILE%\Documents\Schedule Validator\out` (the install
+All are written to `%USERPROFILE%\Documents\Schedule Validator\out` (the install
 directory is not writable).
 
 ---

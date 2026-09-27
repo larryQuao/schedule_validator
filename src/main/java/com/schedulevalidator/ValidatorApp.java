@@ -9,6 +9,7 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
 import javafx.scene.control.TableCell;
@@ -24,9 +25,12 @@ import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,12 +43,15 @@ public class ValidatorApp extends javafx.application.Application {
     private Path uploadFile;
     private Path lastReportFile;
     private Path lastConvertedFile;
+    private Path lastUpdatedFile;
 
     private Label refLabel;
     private Label upLabel;
+    private ComboBox<String> sheetBox;
     private Button validateButton;
     private Button exportReportButton;
     private Button exportConvertedButton;
+    private Button exportUpdatedButton;
     private ProgressIndicator progress;
     private Label statusLabel;
     private TableView<ValidationIssue> table;
@@ -87,6 +94,7 @@ public class ValidatorApp extends javafx.application.Application {
             if (p != null) {
                 referenceFile = p;
                 refLabel.setText(p.toString());
+                loadSheetNames(p);
             }
         });
 
@@ -105,7 +113,12 @@ public class ValidatorApp extends javafx.application.Application {
             }
         });
 
-        validateButton = new Button("Validate");
+        sheetBox = new ComboBox<>();
+        sheetBox.setDisable(true);
+        sheetBox.setPrefWidth(280);
+        sheetBox.setTooltip(new Tooltip("Sheet of the contribution report to compare against"));
+
+        validateButton = new Button("Validate & merge new month");
         validateButton.setStyle("-fx-font-weight: bold;");
         validateButton.setOnAction(e -> runValidation());
 
@@ -119,12 +132,36 @@ public class ValidatorApp extends javafx.application.Application {
         grid.add(new Label("Uploaded schedule"), 0, 1);
         grid.add(upLabel, 1, 1);
         grid.add(pickUp, 2, 1);
+        grid.add(new Label("Reference sheet"), 0, 2);
+        grid.add(sheetBox, 1, 2);
 
         HBox actions = new HBox(10, validateButton, progress);
         actions.setAlignment(Pos.CENTER_LEFT);
         grid.add(actions, 2, 2, 2, 1);
 
         return grid;
+    }
+
+    /** Lists the workbook's sheets and pre-selects the latest monthly one. */
+    private void loadSheetNames(Path workbookFile) {
+        try (Workbook wb = WorkbookFactory.create(workbookFile.toFile(), null, true)) {
+            List<String> names = new ArrayList<>();
+            wb.sheetIterator().forEachRemaining(s -> names.add(s.getSheetName()));
+            sheetBox.setItems(FXCollections.observableArrayList(names));
+            sheetBox.setDisable(names.isEmpty());
+            String monthly = null;
+            for (String n : names) {
+                if (n.toUpperCase().matches(".*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*.*(19|20)\\d\\d.*")) {
+                    monthly = n;
+                }
+            }
+            sheetBox.getSelectionModel().select(monthly != null ? monthly : names.get(names.size() - 1));
+            statusLabel.setText("Loaded " + names.size() + " sheets - pick the sheet to compare against.");
+        } catch (Exception ex) {
+            sheetBox.getItems().clear();
+            sheetBox.setDisable(true);
+            statusLabel.setText("Could not read sheets: " + ex.getMessage());
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -189,9 +226,12 @@ public class ValidatorApp extends javafx.application.Application {
         exportConvertedButton = new Button("Save converted .xlsx");
         exportConvertedButton.setDisable(true);
         exportConvertedButton.setOnAction(e -> copyOut(lastConvertedFile, "converted_schedule.xlsx"));
+        exportUpdatedButton = new Button("Save updated report");
+        exportUpdatedButton.setDisable(true);
+        exportUpdatedButton.setOnAction(e -> copyOut(lastUpdatedFile, "updated_report.xlsx"));
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox box = new HBox(12, statusLabel, spacer, exportReportButton, exportConvertedButton);
+        HBox box = new HBox(12, statusLabel, spacer, exportReportButton, exportConvertedButton, exportUpdatedButton);
         box.setAlignment(Pos.CENTER_LEFT);
         box.setPadding(new Insets(10));
         return box;
@@ -209,20 +249,28 @@ public class ValidatorApp extends javafx.application.Application {
             statusLabel.setText("Pick at least one file first.");
             return;
         }
+        boolean mergeMode = referenceFile != null && uploadFile != null && !sheetBox.isDisabled();
+        if (mergeMode && sheetBox.getSelectionModel().isEmpty()) {
+            statusLabel.setText("Select the reference sheet to compare against.");
+            return;
+        }
         validateButton.setDisable(true);
         progress.setVisible(true);
         statusLabel.setText("Working...");
 
         Path ref = referenceFile;
         Path up = uploadFile;
+        String sheet = mergeMode ? sheetBox.getValue() : null;
         Path outDir = Pipeline.defaultOutDir();
         Path tessdata = Pipeline.resolveTessdataDir();
 
         Task<Pipeline.Result> task = new Task<>() {
             @Override
             protected Pipeline.Result call() throws Exception {
-                List<String> log = new java.util.ArrayList<>();
-                Pipeline.Result result = Pipeline.run(ref, up, outDir, tessdata, log);
+                List<String> log = new ArrayList<>();
+                Pipeline.Result result = (sheet != null)
+                        ? Pipeline.runSheetMerge(ref, sheet, up, outDir, tessdata, log)
+                        : Pipeline.run(ref, up, outDir, tessdata, log);
                 for (String line : log) {
                     updateMessage(line);
                 }
@@ -238,12 +286,14 @@ public class ValidatorApp extends javafx.application.Application {
             table.setItems(FXCollections.observableArrayList(result.issues()));
             long errors = result.issues().stream().filter(i -> i.severity() == ValidationIssue.Severity.ERROR).count();
             long warnings = result.issues().stream().filter(i -> i.severity() == ValidationIssue.Severity.WARNING).count();
-            statusLabel.setText("Done. " + errors + " error(s), " + warnings + " warning(s), "
-                    + result.issues().size() + " finding(s) total. Outputs in " + outDir.toAbsolutePath());
+            statusLabel.setText("Done. " + errors + " error(s), " + warnings + " warning(s). Outputs in "
+                    + outDir.toAbsolutePath());
             lastReportFile = result.reportFile();
             lastConvertedFile = result.convertedFile();
+            lastUpdatedFile = result.updatedWorkbook();
             exportReportButton.setDisable(false);
             exportConvertedButton.setDisable(lastConvertedFile == null);
+            exportUpdatedButton.setDisable(lastUpdatedFile == null);
         });
         task.setOnFailed(e -> {
             progress.setVisible(false);
