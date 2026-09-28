@@ -86,6 +86,33 @@ class SheetMergerTest {
         assertTrue(result.updatedWorkbook().getFileName().toString().endsWith(" - updated.xlsx"));
         assertTrue(Files.size(result.updatedWorkbook()) > 100_000, "updated workbook suspiciously small");
 
+        // final validation workbook: summary + highlighted records + findings
+        assertTrue(Files.isRegularFile(result.finalReportFile()), "final report missing");
+        assertNotNull(result.records());
+        assertEquals(40, result.records().size(), "35 carried + 2 new + 3 removed in records list");
+        assertEquals(35, result.records().stream().filter(r -> "CARRIED".equals(r.status())).count());
+        assertEquals(2, result.records().stream().filter(r -> "NEW".equals(r.status())).count());
+        assertEquals(3, result.records().stream().filter(r -> "REMOVED".equals(r.status())).count());
+        try (XSSFWorkbook fb = new XSSFWorkbook(result.finalReportFile().toFile())) {
+            assertNotNull(fb.getSheet("Summary"));
+            XSSFSheet recs = fb.getSheet("Updated Records");
+            assertNotNull(recs);
+            boolean sawGreen = false;
+            boolean sawRed = false;
+            for (Row row : recs) {
+                for (Cell c : row) {
+                    CellStyle st = c.getCellStyle();
+                    if (st.getFillPattern() == FillPatternType.SOLID_FOREGROUND
+                            && st.getFillForegroundColor() == IndexedColors.LIGHT_GREEN.getIndex()) sawGreen = true;
+                    if (st.getFillPattern() == FillPatternType.SOLID_FOREGROUND
+                            && st.getFillForegroundColor() == IndexedColors.ROSE.getIndex()) sawRed = true;
+                }
+            }
+            assertTrue(sawGreen, "final report should highlight NEW rows green");
+            assertTrue(sawRed, "final report should highlight REMOVED rows red");
+            assertNotNull(fb.getSheet("Findings"));
+        }
+
         try (XSSFWorkbook wb = new XSSFWorkbook(result.updatedWorkbook().toFile())) {
             XSSFSheet sh = wb.getSheet("SEPTEMBER 2026");
             assertNotNull(sh, "new month sheet missing");

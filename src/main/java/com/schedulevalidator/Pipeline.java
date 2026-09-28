@@ -27,7 +27,9 @@ public final class Pipeline {
                          List<ValidationIssue> issues,
                          Path reportFile,
                          Path convertedFile,
-                         Path updatedWorkbook) {}
+                         Path updatedWorkbook,
+                         Path finalReportFile,
+                         List<SheetMerger.RecordRow> records) {}
 
     private Pipeline() {}
 
@@ -111,7 +113,7 @@ public final class Pipeline {
             exporter.writeConvertedSchedule(upReport, convertedFile);
             log.add("Wrote " + convertedFile + " (converted to .xlsx in reference layout)");
         }
-        return new Result(upReport, refReport, issues, reportFile, convertedFile, null);
+        return new Result(upReport, refReport, issues, reportFile, convertedFile, null, null, null);
     }
 
     /**
@@ -168,7 +170,14 @@ public final class Pipeline {
         Path reportFile = outDir.resolve("validation_report.xlsx");
         new XlsxExporter().writeValidationReport(issues, referencePath, uploadPath, reportFile);
         log.add("Wrote " + reportFile);
-        return new Result(upReport, refReport, issues, reportFile, null, merge.updatedWorkbook());
+
+        Path finalReport = outDir.resolve("final_validation_report.xlsx");
+        new XlsxExporter().writeFinalValidationReport(merge.records(), issues, referencePath,
+                selected.sheetName(), uploadPath, merge.newSheetName(),
+                merge.matched(), merge.added(), merge.removed(), finalReport);
+        log.add("Wrote " + finalReport + " (summary + final records + findings)");
+        return new Result(upReport, refReport, issues, reportFile, null, merge.updatedWorkbook(),
+                finalReport, merge.records());
     }
 
     static String extension(Path file) {

@@ -44,3 +44,13 @@
 .sev-info {
     -fx-text-fill: #57606a;
 }
+
+.rec-new {
+    -fx-text-fill: #1a7f37;
+    -fx-font-weight: bold;
+}
+
+.rec-removed {
+    -fx-text-fill: #cf222e;
+    -fx-font-weight: bold;
+}

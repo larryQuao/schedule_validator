@@ -40,7 +40,16 @@ import java.util.regex.Pattern;
 public final class SheetMerger {
 
     public record MergeSummary(Path updatedWorkbook, String newSheetName,
-                               int matched, int added, int removed, List<String> notes) {}
+                               int matched, int added, int removed, List<String> notes,
+                               List<RecordRow> records) {}
+
+    /** One row of the final merged schedule, for display and the final validation report. */
+    public record RecordRow(String status, Integer seq, String memberCode, String ssNumber,
+                            String name, Double basicSalary, Double contribution) {}
+
+    public static final String STATUS_CARRIED = "CARRIED";
+    public static final String STATUS_NEW = "NEW";
+    public static final String STATUS_REMOVED = "REMOVED";
 
     private static final Pattern A1_REF = Pattern.compile("(\\$?[A-Z]{1,3})(\\$?)(\\d{1,5})");
 
@@ -126,14 +135,17 @@ public final class SheetMerger {
             Map<Short, CellStyle> greenCache = new HashMap<>();
             Map<Short, CellStyle> redCache = new HashMap<>();
             List<String> notes = new ArrayList<>();
+            List<RecordRow> records = new ArrayList<>();
 
             int seq = 1;
             int r0 = ti.headerRow0() + 1; // 0-based row cursor
             for (ContributionEntry up : matched) {
-                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, null, null, notes);
+                writeDataRow(sh, r0++, up, seq, ti, colStyles, colFormulas, colFormulaRow1, null, null, notes);
+                records.add(toRow(STATUS_CARRIED, seq++, up));
             }
             for (ContributionEntry up : added) {
-                writeDataRow(sh, r0++, up, seq++, ti, colStyles, colFormulas, colFormulaRow1, greenCache, IndexedColors.LIGHT_GREEN, notes);
+                writeDataRow(sh, r0++, up, seq, ti, colStyles, colFormulas, colFormulaRow1, greenCache, IndexedColors.LIGHT_GREEN, notes);
+                records.add(toRow(STATUS_NEW, seq++, up));
             }
             int lastData1 = r0; // 1-based row number of the last data row
 
@@ -179,6 +191,7 @@ public final class SheetMerger {
             // ---------------------------------------------------------------- removed rows
             for (ContributionEntry ex : removed) {
                 writeRemovedRow(sh, r0++, ex, ti, colStyles, colFormulas, colFormulaRow1, redCache, notes);
+                records.add(toRow(STATUS_REMOVED, null, ex));
             }
 
             // ---------------------------------------------------------------- geometry
@@ -197,8 +210,14 @@ public final class SheetMerger {
             try (var os = Files.newOutputStream(out)) {
                 wb.write(os);
             }
-            return new MergeSummary(out, newName, matched.size(), added.size(), removed.size(), notes);
+            return new MergeSummary(out, newName, matched.size(), added.size(), removed.size(),
+                    notes, records);
         }
+    }
+
+    private static RecordRow toRow(String status, Integer seq, ContributionEntry e) {
+        return new RecordRow(status, seq, e.memberCode(), e.ssNumber(), e.displayName(),
+                e.basicSalary(), e.contribution());
     }
 
     // ------------------------------------------------------------------ row writers

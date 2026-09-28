@@ -1,5 +1,6 @@
 package com.schedulevalidator;
 
+import com.schedulevalidator.convert.SheetMerger;
 import com.schedulevalidator.model.ValidationIssue;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -12,6 +13,8 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
@@ -44,6 +47,7 @@ public class ValidatorApp extends javafx.application.Application {
     private Path lastReportFile;
     private Path lastConvertedFile;
     private Path lastUpdatedFile;
+    private Path lastFinalFile;
 
     private Label refLabel;
     private Label upLabel;
@@ -52,9 +56,12 @@ public class ValidatorApp extends javafx.application.Application {
     private Button exportReportButton;
     private Button exportConvertedButton;
     private Button exportUpdatedButton;
+    private Button exportFinalButton;
     private ProgressIndicator progress;
     private Label statusLabel;
     private TableView<ValidationIssue> table;
+    private TableView<SheetMerger.RecordRow> recordsTable;
+    private Tab recordsTab;
 
     @Override
     public void start(Stage stage) {
@@ -62,7 +69,14 @@ public class ValidatorApp extends javafx.application.Application {
 
         BorderPane root = new BorderPane();
         root.setTop(buildInputPanel(stage));
-        root.setCenter(buildResultsTable());
+
+        Tab findingsTab = new Tab("Findings", buildResultsTable());
+        findingsTab.setClosable(false);
+        recordsTab = new Tab("Final Records", buildRecordsTable());
+        recordsTab.setClosable(false);
+        TabPane tabs = new TabPane(findingsTab, recordsTab);
+        root.setCenter(tabs);
+
         root.setBottom(buildStatusBar());
 
         Scene scene = new Scene(root, 1200, 750);
@@ -218,6 +232,62 @@ public class ValidatorApp extends javafx.application.Application {
         return table;
     }
 
+    /** The merged schedule rows: CARRIED / NEW (green) / REMOVED (red). */
+    @SuppressWarnings("unchecked")
+    private TableView<SheetMerger.RecordRow> buildRecordsTable() {
+        recordsTable = new TableView<>();
+
+        TableColumn<SheetMerger.RecordRow, String> st = new TableColumn<>("Status");
+        st.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().status()));
+        st.setPrefWidth(100);
+        st.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : item);
+                if (!empty && item != null) {
+                    getStyleClass().removeAll("sev-error", "sev-warning", "rec-new", "rec-removed");
+                    getStyleClass().add(switch (item) {
+                        case "NEW" -> "rec-new";
+                        case "REMOVED" -> "rec-removed";
+                        default -> "sev-info";
+                    });
+                }
+            }
+        });
+
+        TableColumn<SheetMerger.RecordRow, String> sn = new TableColumn<>("S/N");
+        sn.setCellValueFactory(c -> new SimpleStringProperty(
+                c.getValue().seq() == null ? "" : String.valueOf(c.getValue().seq())));
+        sn.setPrefWidth(50);
+
+        TableColumn<SheetMerger.RecordRow, String> mc = new TableColumn<>("Member Code");
+        mc.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().memberCode()));
+        mc.setPrefWidth(140);
+
+        TableColumn<SheetMerger.RecordRow, String> ss = new TableColumn<>("SS No");
+        ss.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().ssNumber()));
+        ss.setPrefWidth(140);
+
+        TableColumn<SheetMerger.RecordRow, String> nm = new TableColumn<>("Name");
+        nm.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().name()));
+        nm.setPrefWidth(260);
+
+        TableColumn<SheetMerger.RecordRow, String> sal = new TableColumn<>("Basic Salary");
+        sal.setCellValueFactory(c -> new SimpleStringProperty(
+                c.getValue().basicSalary() == null ? "" : String.format("%,.2f", c.getValue().basicSalary())));
+        sal.setPrefWidth(110);
+
+        TableColumn<SheetMerger.RecordRow, String> con = new TableColumn<>("5% Contribution");
+        con.setCellValueFactory(c -> new SimpleStringProperty(
+                c.getValue().contribution() == null ? "" : String.format("%,.2f", c.getValue().contribution())));
+        con.setPrefWidth(120);
+
+        recordsTable.getColumns().addAll(st, sn, mc, ss, nm, sal, con);
+        recordsTable.setPlaceholder(new Label("Run a validation & merge to see the final records here."));
+        return recordsTable;
+    }
+
     private javafx.scene.Parent buildStatusBar() {
         statusLabel = new Label("Ready.");
         exportReportButton = new Button("Export validation report");
@@ -229,9 +299,14 @@ public class ValidatorApp extends javafx.application.Application {
         exportUpdatedButton = new Button("Save updated report");
         exportUpdatedButton.setDisable(true);
         exportUpdatedButton.setOnAction(e -> copyOut(lastUpdatedFile, "updated_report.xlsx"));
+        exportFinalButton = new Button("Download final report");
+        exportFinalButton.setDisable(true);
+        exportFinalButton.setStyle("-fx-font-weight: bold;");
+        exportFinalButton.setOnAction(e -> copyOut(lastFinalFile, "final_validation_report.xlsx"));
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox box = new HBox(12, statusLabel, spacer, exportReportButton, exportConvertedButton, exportUpdatedButton);
+        HBox box = new HBox(12, statusLabel, spacer, exportReportButton, exportConvertedButton,
+                exportUpdatedButton, exportFinalButton);
         box.setAlignment(Pos.CENTER_LEFT);
         box.setPadding(new Insets(10));
         return box;
@@ -291,9 +366,15 @@ public class ValidatorApp extends javafx.application.Application {
             lastReportFile = result.reportFile();
             lastConvertedFile = result.convertedFile();
             lastUpdatedFile = result.updatedWorkbook();
+            lastFinalFile = result.finalReportFile();
             exportReportButton.setDisable(false);
             exportConvertedButton.setDisable(lastConvertedFile == null);
             exportUpdatedButton.setDisable(lastUpdatedFile == null);
+            exportFinalButton.setDisable(lastFinalFile == null);
+            if (result.records() != null) {
+                recordsTable.setItems(FXCollections.observableArrayList(result.records()));
+                Platform.runLater(() -> recordsTab.getTabPane().getSelectionModel().select(recordsTab));
+            }
         });
         task.setOnFailed(e -> {
             progress.setVisible(false);

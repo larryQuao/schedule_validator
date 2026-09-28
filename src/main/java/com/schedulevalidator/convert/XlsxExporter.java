@@ -106,6 +106,119 @@ public final class XlsxExporter {
         }
     }
 
+    /**
+     * The single deliverable for the new-month flow: one workbook with the validation
+     * summary, the final merged records (NEW = green, REMOVED = red) and all findings.
+     */
+    public void writeFinalValidationReport(List<com.schedulevalidator.convert.SheetMerger.RecordRow> records,
+                                           List<ValidationIssue> issues,
+                                           Path refPath, String templateSheet, Path uploadPath,
+                                           String newSheetName, int carried, int added, int removed,
+                                           Path out) throws IOException {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            CellStyle bold = boldStyle(wb);
+            int r;
+
+            // ---- Summary
+            Sheet summary = wb.createSheet("Summary");
+            r = infoLine(summary, 0, "Schedule Validator - final validation", "", bold);
+            r = infoLine(summary, r, "Generated", LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")));
+            r = infoLine(summary, r, "Reference file", refPath == null ? "-" : refPath.toString());
+            r = infoLine(summary, r, "Reference sheet (template)", nz(templateSheet));
+            r = infoLine(summary, r, "Uploaded file", uploadPath == null ? "-" : uploadPath.toString());
+            r = infoLine(summary, r, "New sheet created", nz(newSheetName));
+            r++;
+            r = infoLine(summary, r, "Records carried over", String.valueOf(carried), bold);
+            r = infoLine(summary, r, "New records (green)", String.valueOf(added), bold);
+            r = infoLine(summary, r, "Removed records (red)", String.valueOf(removed), bold);
+            r++;
+            Map<ValidationIssue.Severity, Long> bySeverity = new EnumMap<>(ValidationIssue.Severity.class);
+            issues.forEach(i -> bySeverity.merge(i.severity(), 1L, Long::sum));
+            r = infoLine(summary, r, "Errors", String.valueOf(bySeverity.getOrDefault(ValidationIssue.Severity.ERROR, 0L)), bold);
+            r = infoLine(summary, r, "Warnings", String.valueOf(bySeverity.getOrDefault(ValidationIssue.Severity.WARNING, 0L)), bold);
+            r = infoLine(summary, r, "Info", String.valueOf(bySeverity.getOrDefault(ValidationIssue.Severity.INFO, 0L)), bold);
+            summary.setColumnWidth(0, 30 * 256);
+            summary.setColumnWidth(1, 110 * 256);
+
+            // ---- Updated Records
+            Sheet rec = wb.createSheet("Updated Records");
+            CellStyle head = boxed(bold);
+            String[] headers = {"Status", "S/N", "Member Code", "SS No", "Name",
+                    "Basic Salary", "5% Contribution"};
+            Row h = rec.createRow(0);
+            for (int i = 0; i < headers.length; i++) text(h, i, headers[i], head);
+            CellStyle green = filled(wb, IndexedColors.LIGHT_GREEN.getIndex());
+            CellStyle red = filled(wb, IndexedColors.ROSE.getIndex());
+            CellStyle num = numberStyle(wb);
+            double salaryTotal = 0;
+            double contributionTotal = 0;
+            int row = 1;
+            for (var rec0 : records) {
+                Row rr = rec.createRow(row++);
+                CellStyle statusStyle = SheetMerger.STATUS_NEW.equals(rec0.status()) ? green
+                        : SheetMerger.STATUS_REMOVED.equals(rec0.status()) ? red : null;
+                text(rr, 0, rec0.status(), statusStyle);
+                if (rec0.seq() != null) num(rr, 1, rec0.seq(), null);
+                text(rr, 2, rec0.memberCode(), statusStyle);
+                text(rr, 3, rec0.ssNumber(), statusStyle);
+                text(rr, 4, rec0.name(), statusStyle);
+                if (rec0.basicSalary() != null) {
+                    num(rr, 5, rec0.basicSalary(), statusStyle == null ? num : statusStyle);
+                }
+                if (rec0.contribution() != null) {
+                    num(rr, 6, rec0.contribution(), statusStyle == null ? num : statusStyle);
+                }
+                if (!SheetMerger.STATUS_REMOVED.equals(rec0.status())) {
+                    if (rec0.basicSalary() != null) salaryTotal += rec0.basicSalary();
+                    if (rec0.contribution() != null) contributionTotal += rec0.contribution();
+                }
+            }
+            Row tot = rec.createRow(row);
+            text(tot, 0, "TOTAL (excl. removed)", bold);
+            num(tot, 5, salaryTotal, num);
+            num(tot, 6, contributionTotal, num);
+            rec.setAutoFilter(new CellRangeAddress(0, Math.max(row - 1, 0), 0, headers.length - 1));
+            rec.createFreezePane(0, 1);
+            float[] w = {16, 6, 20, 20, 42, 14, 16};
+            for (int i = 0; i < w.length; i++) rec.setColumnWidth(i, (int) (w[i] * 256));
+
+            // ---- Findings
+            writeFindingsSheet(wb, issues);
+
+            try (OutputStream os = Files.newOutputStream(out)) {
+                wb.write(os);
+            }
+        }
+    }
+
+    /** Writes the filterable findings sheet into an open workbook. */
+    private void writeFindingsSheet(XSSFWorkbook wb, List<ValidationIssue> issues) {
+        Sheet findings = wb.createSheet("Findings");
+        String[] headers = {"Severity", "Source", "Sheet", "Location", "Rule", "Message"};
+        Row h = findings.createRow(0);
+        CellStyle head = boxed(boldStyle(wb));
+        for (int i = 0; i < headers.length; i++) text(h, i, headers[i], head);
+
+        CellStyle errorStyle = filled(wb, IndexedColors.ROSE.getIndex());
+        CellStyle warnStyle = filled(wb, IndexedColors.LEMON_CHIFFON.getIndex());
+        CellStyle infoStyle = filled(wb, IndexedColors.GREY_25_PERCENT.getIndex());
+        int row = 1;
+        for (ValidationIssue issue : issues) {
+            Row rr = findings.createRow(row++);
+            text(rr, 0, issue.severity().toString(),
+                    styleFor(issue.severity(), errorStyle, warnStyle, infoStyle));
+            text(rr, 1, issue.source(), null);
+            text(rr, 2, issue.sheet(), null);
+            text(rr, 3, issue.location(), null);
+            text(rr, 4, issue.rule(), null);
+            text(rr, 5, issue.message(), null);
+        }
+        findings.setAutoFilter(new CellRangeAddress(0, Math.max(row - 1, 0), 0, headers.length - 1));
+        findings.createFreezePane(0, 1);
+        float[] w = {10, 14, 22, 16, 26, 110};
+        for (int i = 0; i < w.length; i++) findings.setColumnWidth(i, (int) (w[i] * 256));
+    }
+
     public void writeValidationReport(List<ValidationIssue> issues, Path refPath, Path uploadPath,
                                       Path out) throws IOException {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
