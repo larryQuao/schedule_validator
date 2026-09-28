@@ -59,11 +59,16 @@ public final class SheetMerger {
                               Path outDir) throws IOException {
         final Workbook wb;
         try {
-            wb = WorkbookFactory.create(referenceXlsx.toFile());
+            // read the bytes first and open in memory: opening the file directly requests a
+            // write handle, which Windows denies while the workbook is open in Excel
+            wb = WorkbookFactory.create(new java.io.ByteArrayInputStream(
+                    Files.readAllBytes(referenceXlsx)));
         } catch (IOException e) {
-            throw e;
+            throw new IOException("Cannot read " + referenceXlsx.getFileName()
+                    + " - it may be open in Excel or locked on the network share."
+                    + " Close it there and retry, or save a local copy. (" + e.getMessage() + ")", e);
         } catch (Exception e) {
-            throw new IOException("Not a readable Excel file (.xlsx/.xls): " + referenceXlsx, e);
+            throw new IOException("Not a readable Excel workbook (.xlsx/.xls): " + referenceXlsx, e);
         }
         try (wb) {
             Sheet template = wb.getSheet(templateSheetName);

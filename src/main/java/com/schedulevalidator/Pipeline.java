@@ -60,14 +60,23 @@ public final class Pipeline {
 
     public static ContributionReport parse(Path file, Path tessdataDir) throws IOException {
         String ext = extension(file);
-        return switch (ext) {
-            case "xlsx", "xlsm", "xls" -> new XlsxScheduleParser().parse(file);
-            case "pdf" -> new PdfScheduleParser().parse(file.toFile());
-            case "png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif" ->
-                    new ImageScheduleParser(tessdataDir).parse(file);
-            default -> throw new IOException("Unsupported file type ." + ext
-                    + " - use .xlsx, .pdf or an image (png/jpg/tiff/bmp).");
-        };
+        try {
+            return switch (ext) {
+                case "xlsx", "xlsm", "xls" -> new XlsxScheduleParser().parse(file);
+                case "pdf" -> new PdfScheduleParser().parse(file.toFile());
+                case "png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif" ->
+                        new ImageScheduleParser(tessdataDir).parse(file);
+                default -> throw new IOException("Unsupported file type ." + ext
+                        + " - use .xlsx, .xls, .pdf or an image (png/jpg/tiff/bmp).");
+            };
+        } catch (IOException e) {
+            if (String.valueOf(e.getMessage()).contains("being used by another process")) {
+                throw new IOException("Cannot read " + file.getFileName()
+                        + " - it may be open in Excel or locked on the network share."
+                        + " Close it there and retry, or save a local copy.", e);
+            }
+            throw e;
+        }
     }
 
     public record Outputs(Path reportFile, Path convertedFile) {}

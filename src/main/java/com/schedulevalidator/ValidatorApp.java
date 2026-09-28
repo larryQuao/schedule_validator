@@ -9,7 +9,9 @@ import javafx.concurrent.Task;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressIndicator;
@@ -159,7 +161,8 @@ public class ValidatorApp extends javafx.application.Application {
 
     /** Lists the workbook's sheets and pre-selects the latest monthly one. */
     private void loadSheetNames(Path workbookFile) {
-        try (Workbook wb = WorkbookFactory.create(workbookFile.toFile(), null, true)) {
+        try (Workbook wb = WorkbookFactory.create(
+                new java.io.ByteArrayInputStream(java.nio.file.Files.readAllBytes(workbookFile)))) {
             List<String> names = new ArrayList<>();
             wb.sheetIterator().forEachRemaining(s -> names.add(s.getSheetName()));
             sheetBox.setItems(FXCollections.observableArrayList(names));
@@ -381,11 +384,35 @@ public class ValidatorApp extends javafx.application.Application {
             progress.setVisible(false);
             validateButton.setDisable(false);
             Throwable ex = task.getException();
-            statusLabel.setText("Failed: " + (ex == null ? "unknown error" : ex.getMessage()));
+            String msg = ex == null ? "Unknown error" : String.valueOf(ex.getMessage());
+            statusLabel.setText("Failed: " + msg);
+            showErrorDialog(msg, ex);
         });
         Thread worker = new Thread(task, "validation-worker");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /** Modal error dialogue; adds a close-Excel hint for file-lock failures. */
+    private void showErrorDialog(String message, Throwable ex) {
+        boolean lock = message != null && (message.contains("being used by another process")
+                || message.contains("locked on the network") || message.contains("It is already in use"));
+        Alert alert = new Alert(Alert.AlertType.ERROR,
+                message + (lock ? "\n\nThe file may be open in Excel — close it there and try again,"
+                        + " or save a local copy and pick that." : ""),
+                ButtonType.OK);
+        alert.setHeaderText(lock ? "File is in use elsewhere" : "Validation failed");
+        alert.getDialogPane().setMinWidth(600);
+        if (ex != null) {
+            java.io.StringWriter sw = new java.io.StringWriter();
+            ex.printStackTrace(new java.io.PrintWriter(sw));
+            javafx.scene.control.TextArea details = new javafx.scene.control.TextArea(sw.toString());
+            details.setEditable(false);
+            details.setWrapText(true);
+            details.setMaxHeight(220);
+            alert.getDialogPane().setExpandableContent(details);
+        }
+        alert.showAndWait();
     }
 
     private void copyOut(Path source, String suggestedName) {
