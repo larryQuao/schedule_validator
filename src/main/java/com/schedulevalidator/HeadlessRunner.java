@@ -52,8 +52,8 @@ public final class HeadlessRunner {
                   java -cp <classpath> com.schedulevalidator.HeadlessRunner [options]
 
                 Options:
-                  -r, --reference <file>   existing contribution report (.xlsx)
-                  -u, --uploaded  <file>   uploaded schedule (.xlsx, .pdf, or image)
+                  -r, --reference <file>   existing contribution report (.xlsx / .xls / .xlsm)
+                  -u, --uploaded  <file>   uploaded schedule (.xlsx, .xls, .pdf, or image)
                   -s, --sheet     <name>   reference sheet to merge against (enables new-month merge)
                   -o, --out       <dir>    output directory (default: Documents\\Schedule Validator\\out)
 

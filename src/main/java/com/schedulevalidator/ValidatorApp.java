@@ -103,7 +103,8 @@ public class ValidatorApp extends javafx.application.Application {
         pickRef.setOnAction(e -> {
             FileChooser fc = new FileChooser();
             fc.setTitle("Choose the existing contribution report");
-            fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Contribution report (xlsx)", "*.xlsx"));
+            fc.getExtensionFilters().add(new FileChooser.ExtensionFilter(
+                    "Contribution report (xlsx, xls)", "*.xlsx", "*.xls", "*.xlsm"));
             Path p = choose(stage, fc);
             if (p != null) {
                 referenceFile = p;
@@ -118,7 +119,7 @@ public class ValidatorApp extends javafx.application.Application {
             FileChooser fc = new FileChooser();
             fc.setTitle("Choose the uploaded schedule");
             fc.getExtensionFilters().add(new FileChooser.ExtensionFilter(
-                    "Schedule (xlsx, pdf, image)", "*.xlsx", "*.pdf",
+                    "Schedule (xlsx, xls, pdf, image)", "*.xlsx", "*.xls", "*.xlsm", "*.pdf",
                     "*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff", "*.bmp"));
             Path p = choose(stage, fc);
             if (p != null) {

@@ -10,8 +10,9 @@ import org.apache.poi.ss.usermodel.FillPatternType;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.xssf.usermodel.XSSFSheet;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -56,14 +57,16 @@ public final class SheetMerger {
     public MergeSummary build(Path referenceXlsx, String templateSheetName,
                               ScheduleSheet uploadSheet, List<ContributionEntry> uploadEntries,
                               Path outDir) throws IOException {
-        final XSSFWorkbook wb;
+        final Workbook wb;
         try {
-            wb = new XSSFWorkbook(referenceXlsx.toFile());
-        } catch (org.apache.poi.openxml4j.exceptions.InvalidFormatException e) {
-            throw new IOException("Not a valid .xlsx file: " + referenceXlsx, e);
+            wb = WorkbookFactory.create(referenceXlsx.toFile());
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Not a readable Excel file (.xlsx/.xls): " + referenceXlsx, e);
         }
         try (wb) {
-            XSSFSheet template = wb.getSheet(templateSheetName);
+            Sheet template = wb.getSheet(templateSheetName);
             if (template == null) {
                 throw new IOException("Sheet not found in the reference workbook: " + templateSheetName);
             }
@@ -102,7 +105,7 @@ public final class SheetMerger {
 
             // ---------------------------------------------------------------- sheet + structure
             String newName = uniqueName(wb, uploadSheet.periodLabel());
-            XSSFSheet sh = wb.createSheet(newName);
+            Sheet sh = wb.createSheet(newName);
 
             for (int r = 0; r <= ti.headerRow0(); r++) { // header block + column headers
                 copyRowVerbatim(template, sh, r);
@@ -206,7 +209,10 @@ public final class SheetMerger {
             // ---------------------------------------------------------------- save
             Files.createDirectories(outDir);
             String base = referenceXlsx.getFileName().toString().replaceAll("(?i)\\.xlsx?$", "");
-            Path out = outDir.resolve(base + " - updated.xlsx");
+            // output format matches the reference format (.xls stays .xls; HSSF cannot write .xlsx)
+            String ext = referenceXlsx.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".xls")
+                    ? ".xls" : ".xlsx";
+            Path out = outDir.resolve(base + " - updated" + ext);
             try (var os = Files.newOutputStream(out)) {
                 wb.write(os);
             }
@@ -222,7 +228,7 @@ public final class SheetMerger {
 
     // ------------------------------------------------------------------ row writers
 
-    private void writeDataRow(XSSFSheet sh, int r0, ContributionEntry up, int seq,
+    private void writeDataRow(Sheet sh, int r0, ContributionEntry up, int seq,
                               XlsxScheduleParser.TemplateInfo ti, CellStyle[] colStyles,
                               String[] colFormulas, int[] colFormulaRow1,
                               Map<Short, CellStyle> tintCache, IndexedColors tint, List<String> notes) {
@@ -259,7 +265,7 @@ public final class SheetMerger {
         }
     }
 
-    private void writeRemovedRow(XSSFSheet sh, int r0, ContributionEntry ex,
+    private void writeRemovedRow(Sheet sh, int r0, ContributionEntry ex,
                                  XlsxScheduleParser.TemplateInfo ti, CellStyle[] colStyles,
                                  String[] colFormulas, int[] colFormulaRow1,
                                  Map<Short, CellStyle> redCache, List<String> notes) {
@@ -292,7 +298,7 @@ public final class SheetMerger {
         }
     }
 
-    private void copyRowVerbatim(XSSFSheet from, XSSFSheet to, int r0) {
+    private void copyRowVerbatim(Sheet from, Sheet to, int r0) {
         Row src = from.getRow(r0);
         if (src == null) return;
         Row dst = to.createRow(r0);
@@ -320,7 +326,7 @@ public final class SheetMerger {
 
     // ------------------------------------------------------------------ helpers
 
-    private static CellStyle style(XSSFWorkbook wb, CellStyle base, Map<Short, CellStyle> cache, IndexedColors color) {
+    private static CellStyle style(Workbook wb, CellStyle base, Map<Short, CellStyle> cache, IndexedColors color) {
         if (base == null || color == null) return base;
         return cache.computeIfAbsent(base.getIndex(), k -> {
             CellStyle s = wb.createCellStyle();
@@ -392,7 +398,7 @@ public final class SheetMerger {
         }
     }
 
-    private static String uniqueName(XSSFWorkbook wb, String wanted) {
+    private static String uniqueName(Workbook wb, String wanted) {
         String base = wanted == null || wanted.isBlank() ? "NEW ENTRIES" : wanted.trim().toUpperCase(Locale.ROOT);
         base = base.replaceAll("[\\\\/*?:\\[\\]]", "_");
         if (base.length() > 28) base = base.substring(0, 28);
