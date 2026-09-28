@@ -143,8 +143,8 @@ public final class XlsxExporter {
             // ---- Updated Records
             Sheet rec = wb.createSheet("Updated Records");
             CellStyle head = boxed(bold);
-            String[] headers = {"Status", "S/N", "Member Code", "SS No", "Name",
-                    "Basic Salary", "5% Contribution"};
+            String[] headers = {"Status", "S/N", "Member Code", "SS No", "Surname",
+                    "Firstname", "Other Names", "Basic Salary", "5% Contribution"};
             Row h = rec.createRow(0);
             for (int i = 0; i < headers.length; i++) text(h, i, headers[i], head);
             CellStyle green = filled(wb, IndexedColors.LIGHT_GREEN.getIndex());
@@ -161,12 +161,14 @@ public final class XlsxExporter {
                 if (rec0.seq() != null) num(rr, 1, rec0.seq(), null);
                 text(rr, 2, rec0.memberCode(), statusStyle);
                 text(rr, 3, rec0.ssNumber(), statusStyle);
-                text(rr, 4, rec0.name(), statusStyle);
+                text(rr, 4, rec0.surname(), statusStyle);
+                text(rr, 5, rec0.firstName(), statusStyle);
+                text(rr, 6, rec0.otherNames(), statusStyle);
                 if (rec0.basicSalary() != null) {
-                    num(rr, 5, rec0.basicSalary(), statusStyle == null ? num : statusStyle);
+                    num(rr, 7, rec0.basicSalary(), statusStyle == null ? num : statusStyle);
                 }
                 if (rec0.contribution() != null) {
-                    num(rr, 6, rec0.contribution(), statusStyle == null ? num : statusStyle);
+                    num(rr, 8, rec0.contribution(), statusStyle == null ? num : statusStyle);
                 }
                 if (!SheetMerger.STATUS_REMOVED.equals(rec0.status())) {
                     if (rec0.basicSalary() != null) salaryTotal += rec0.basicSalary();
@@ -175,11 +177,11 @@ public final class XlsxExporter {
             }
             Row tot = rec.createRow(row);
             text(tot, 0, "TOTAL (excl. removed)", bold);
-            num(tot, 5, salaryTotal, num);
-            num(tot, 6, contributionTotal, num);
+            num(tot, 7, salaryTotal, num);
+            num(tot, 8, contributionTotal, num);
             rec.setAutoFilter(new CellRangeAddress(0, Math.max(row - 1, 0), 0, headers.length - 1));
             rec.createFreezePane(0, 1);
-            float[] w = {16, 6, 20, 20, 42, 14, 16};
+            float[] w = {16, 6, 20, 20, 24, 20, 22, 14, 16};
             for (int i = 0; i < w.length; i++) rec.setColumnWidth(i, (int) (w[i] * 256));
 
             // ---- Findings

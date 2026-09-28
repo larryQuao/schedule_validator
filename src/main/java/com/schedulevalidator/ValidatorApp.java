@@ -21,6 +21,7 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableRow;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.ColumnConstraints;
@@ -28,6 +29,7 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -64,6 +66,10 @@ public class ValidatorApp extends javafx.application.Application {
     private TableView<ValidationIssue> table;
     private TableView<SheetMerger.RecordRow> recordsTable;
     private Tab recordsTab;
+    private javafx.scene.control.TextField recordsSearch;
+    private javafx.collections.transformation.FilteredList<SheetMerger.RecordRow> filteredRecords;
+    private final javafx.collections.ObservableList<SheetMerger.RecordRow> masterRecords =
+            javafx.collections.FXCollections.observableArrayList();
 
     @Override
     public void start(Stage stage) {
@@ -236,10 +242,14 @@ public class ValidatorApp extends javafx.application.Application {
         return table;
     }
 
-    /** The merged schedule rows: CARRIED / NEW (green) / REMOVED (red). */
+    /** The merged schedule rows: CARRIED / NEW (green) / REMOVED (red), with live search. */
     @SuppressWarnings("unchecked")
-    private TableView<SheetMerger.RecordRow> buildRecordsTable() {
+    private javafx.scene.Parent buildRecordsTable() {
         recordsTable = new TableView<>();
+        filteredRecords = new javafx.collections.transformation.FilteredList<>(masterRecords, r -> true);
+        var sorted = new javafx.collections.transformation.SortedList<>(filteredRecords);
+        sorted.comparatorProperty().bind(recordsTable.comparatorProperty());
+        recordsTable.setItems(sorted);
 
         TableColumn<SheetMerger.RecordRow, String> st = new TableColumn<>("Status");
         st.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().status()));
@@ -273,9 +283,17 @@ public class ValidatorApp extends javafx.application.Application {
         ss.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().ssNumber()));
         ss.setPrefWidth(140);
 
-        TableColumn<SheetMerger.RecordRow, String> nm = new TableColumn<>("Name");
-        nm.setCellValueFactory(c -> new SimpleStringProperty(c.getValue().name()));
-        nm.setPrefWidth(260);
+        TableColumn<SheetMerger.RecordRow, String> surname = new TableColumn<>("Surname");
+        surname.setCellValueFactory(c -> new SimpleStringProperty(nz(c.getValue().surname())));
+        surname.setPrefWidth(130);
+
+        TableColumn<SheetMerger.RecordRow, String> first = new TableColumn<>("Firstname");
+        first.setCellValueFactory(c -> new SimpleStringProperty(nz(c.getValue().firstName())));
+        first.setPrefWidth(120);
+
+        TableColumn<SheetMerger.RecordRow, String> other = new TableColumn<>("Other Names");
+        other.setCellValueFactory(c -> new SimpleStringProperty(nz(c.getValue().otherNames())));
+        other.setPrefWidth(130);
 
         TableColumn<SheetMerger.RecordRow, String> sal = new TableColumn<>("Basic Salary");
         sal.setCellValueFactory(c -> new SimpleStringProperty(
@@ -287,9 +305,36 @@ public class ValidatorApp extends javafx.application.Application {
                 c.getValue().contribution() == null ? "" : String.format("%,.2f", c.getValue().contribution())));
         con.setPrefWidth(120);
 
-        recordsTable.getColumns().addAll(st, sn, mc, ss, nm, sal, con);
+        recordsTable.getColumns().addAll(st, sn, mc, ss, surname, first, other, sal, con);
         recordsTable.setPlaceholder(new Label("Run a validation & merge to see the final records here."));
-        return recordsTable;
+
+        recordsSearch = new TextField();
+        recordsSearch.setPromptText("Search by name or SS number...");
+        recordsSearch.textProperty().addListener((obs, ov, nv) -> applyRecordsFilter());
+        HBox bar = new HBox(8, new Label("Search:"), recordsSearch);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        bar.setPadding(new Insets(6));
+        HBox.setHgrow(recordsSearch, Priority.ALWAYS);
+        VBox box = new VBox(bar, recordsTable);
+        VBox.setVgrow(recordsTable, Priority.ALWAYS);
+        return box;
+    }
+
+    /** Live filter over the final records: any name part, full name, or SS number. */
+    private void applyRecordsFilter() {
+        String q = recordsSearch.getText() == null ? "" : recordsSearch.getText().trim().toLowerCase();
+        filteredRecords.setPredicate(r -> q.isEmpty()
+                || contains(r.surname(), q) || contains(r.firstName(), q)
+                || contains(r.otherNames(), q) || contains(r.fullName(), q)
+                || contains(r.ssNumber(), q));
+    }
+
+    private static boolean contains(String value, String query) {
+        return value != null && value.toLowerCase().contains(query);
+    }
+
+    private static String nz(String s) {
+        return s == null ? "" : s;
     }
 
     private javafx.scene.Parent buildStatusBar() {
@@ -376,7 +421,7 @@ public class ValidatorApp extends javafx.application.Application {
             exportUpdatedButton.setDisable(lastUpdatedFile == null);
             exportFinalButton.setDisable(lastFinalFile == null);
             if (result.records() != null) {
-                recordsTable.setItems(FXCollections.observableArrayList(result.records()));
+                masterRecords.setAll(result.records());
                 Platform.runLater(() -> recordsTab.getTabPane().getSelectionModel().select(recordsTab));
             }
         });

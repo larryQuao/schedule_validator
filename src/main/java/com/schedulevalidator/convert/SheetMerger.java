@@ -46,7 +46,20 @@ public final class SheetMerger {
 
     /** One row of the final merged schedule, for display and the final validation report. */
     public record RecordRow(String status, Integer seq, String memberCode, String ssNumber,
-                            String name, Double basicSalary, Double contribution) {}
+                            String surname, String firstName, String otherNames,
+                            Double basicSalary, Double contribution) {
+
+        public String fullName() {
+            StringBuilder sb = new StringBuilder();
+            for (String p : new String[]{surname, firstName, otherNames}) {
+                if (p != null && !p.isBlank()) {
+                    if (!sb.isEmpty()) sb.append(' ');
+                    sb.append(p.trim());
+                }
+            }
+            return sb.toString();
+        }
+    }
 
     public static final String STATUS_CARRIED = "CARRIED";
     public static final String STATUS_NEW = "NEW";
@@ -227,8 +240,8 @@ public final class SheetMerger {
     }
 
     private static RecordRow toRow(String status, Integer seq, ContributionEntry e) {
-        return new RecordRow(status, seq, e.memberCode(), e.ssNumber(), e.displayName(),
-                e.basicSalary(), e.contribution());
+        return new RecordRow(status, seq, e.memberCode(), e.ssNumber(),
+                e.surname(), e.firstName(), e.otherNames(), e.basicSalary(), e.contribution());
     }
 
     // ------------------------------------------------------------------ row writers
